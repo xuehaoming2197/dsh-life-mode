@@ -27,9 +27,24 @@
 git clone https://github.com/<owner>/dsh-life-mode.git "$env:USERPROFILE\dsh-life-mode"
 ```
 
-没有 git 就用别的方式拿到目录。下文用 `<repo>` 指这个目录。
+**没装 git 的机器很常见，别在这卡住**，用 zip：
+
+```powershell
+$zip = "$env:TEMP\dsh-life-mode.zip"
+Invoke-WebRequest -Uri 'https://codeload.github.com/<owner>/dsh-life-mode/zip/refs/heads/main' -OutFile $zip -UseBasicParsing
+Expand-Archive -Path $zip -DestinationPath "$env:USERPROFILE" -Force
+```
+
+解出来的目录叫 `dsh-life-mode-main`（带分支后缀），下面就用它当 `<repo>`：
+
+```
+<repo> = C:\Users\<你>\dsh-life-mode-main
+```
 
 **验证**：`<repo>\bundles\life-context\index.js` 存在。
+
+**失败怎么办**：两个地址都下不动就是网络问题，让用户手动下载 zip 解压，再问他要路径。
+不要在这步反复重试超过两次。
 
 ---
 
