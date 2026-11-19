@@ -132,6 +132,20 @@ Chinese only, in [`docs/`](./docs):
 - `03-memory.md` — scoring, decay, tiers, day summaries
 - `04-pitfalls.md` — every landmine we stepped on
 
+## How this was made
+
+To be explicit about the split: **the human supplied the initial idea and the decisions
+along the way. The code was written by DeepSeek.**
+
+The calls that made this what it is — "fold a middle range instead of truncating the
+front", "memory has to actually forget", "keep the personality in the prefix instead of
+re-injecting it every turn" — came from the human. Wiring the APIs, figuring out the
+boundary rules, hitting the failure modes and fixing them, writing the docs and the
+installer — that was the model, working inside DSH, turn after turn.
+
+Which is why the code looks grown rather than designed. Every entry in
+`docs/04-pitfalls.md` was a wall we actually walked into.
+
 ## License
 
 MIT.
