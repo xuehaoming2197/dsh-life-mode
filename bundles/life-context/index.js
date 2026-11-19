@@ -544,7 +544,7 @@ function createContextTools(deps) {
     {
       name: 'context_fold',
       description:
-        '把上下文里的【某一段】压成一条摘要，前后的内容原样不动。逐字细节会消失，所以先把自己觉得不能忘的写进 remember——那几句会写进记忆，压完还在。用 fromTurn / toTurn 指定压哪一段；都不填就是从头压到"最近 beforeTurns 轮之前"。',
+        '把上下文里的某一（几）段压成摘要，前后的内容原样不动。逐字细节会消失，所以先把自己觉得不能忘的写进 remember——那几句会写进记忆，压完还在。压一段用 fromTurn/toTurn；压多段用 ranges（段与段可以不相邻）；都不填就是从头压到"最近 beforeTurns 轮之前"。',
       parameters: {
         type: 'object',
         properties: {
@@ -557,6 +557,21 @@ function createContextTools(deps) {
             type: 'integer',
             minimum: 1,
             description: '压到第几轮为止（含这一轮）。不填就用"最近 beforeTurns 轮之前"那条线。',
+          },
+          ranges: {
+            type: 'array',
+            maxItems: 8,
+            description:
+              '一次压多段：每项 {fromTurn, toTurn}，两头都含，段与段可以不相邻。重叠或相邻的会自动并成一段。最多 8 段。',
+            items: {
+              type: 'object',
+              properties: {
+                fromTurn: { type: 'integer', minimum: 1 },
+                toTurn: { type: 'integer', minimum: 1 },
+              },
+              required: ['fromTurn', 'toTurn'],
+              additionalProperties: false,
+            },
           },
           beforeTurns: {
             type: 'integer',
@@ -583,12 +598,43 @@ function createContextTools(deps) {
 
         const remember = String((args && args.remember) || '').trim()
         /* 区间用轮次说：fromTurn 含、toTurn 含。都不填就是"从头压到最近 beforeTurns 轮之前" */
-        const wantFrom = Number.isFinite(Number(args && args.fromTurn)) ? Math.max(1, Number(args.fromTurn)) : null
-        const wantTo = Number.isFinite(Number(args && args.toTurn)) ? Math.max(1, Number(args.toTurn)) : null
+        const clampTurn = (v) => (Number.isFinite(Number(v)) ? Math.max(1, Math.floor(Number(v))) : null)
         const keepTurns = Math.max(1, Number(args && args.beforeTurns) || 30)
+        /* ---------- 先把要压的区间定下来 ---------- */
+        const rawRanges = Array.isArray(args && args.ranges) ? args.ranges : []
+        let runs
+        if (rawRanges.length) {
+          if (rawRanges.length > 8) return { text: '一次最多压 8 段，分几次来吧。' }
+          const picked = []
+          for (const r of rawRanges) {
+            const f = clampTurn(r && r.fromTurn)
+            const t = clampTurn(r && r.toTurn)
+            if (f === null || t === null) {
+              return { text: 'ranges 里每一段都要写 fromTurn 和 toTurn（轮次，两头都含）。' }
+            }
+            if (t < f) return { text: `区间反了：第${f}轮到第${t}轮。` }
+            picked.push({ from: f, to: t })
+          }
+          /* 从后往前：先压靠后的段，前面那些回合的边界不会被动到 */
+          picked.sort((a, b) => b.from - a.from)
+          const merged = []
+          for (const r of picked) {
+            const last = merged[merged.length - 1]
+            /* 重叠、或者正好挨着（r.to 比 last.from 小 1），就并成一段 */
+            if (last && r.to >= last.from - 1) {
+              last.from = Math.min(last.from, r.from)
+              last.to = Math.max(last.to, r.to)
+            } else {
+              merged.push({ ...r })
+            }
+          }
+          runs = merged
+        } else {
+          runs = [{ from: clampTurn(args && args.fromTurn), to: clampTurn(args && args.toTurn) }]
+        }
         deps.log(
           cfg,
-          `context_fold 开始 区间=${wantFrom ?? '开头'}~${wantTo ?? `最近${keepTurns}轮之前`} 记住=${remember.length}字`,
+          `context_fold 开始 段=${runs.length} ${runs.map((r) => `${r.from ?? '开头'}~${r.to ?? `最近${keepTurns}轮之前`}`).join(',')} 记住=${remember.length}字`,
         )
         if (remember) {
           try {
@@ -610,7 +656,7 @@ function createContextTools(deps) {
         }
         const maxTurn = Math.max(...turns)
         /* 压到这一轮为止（含）。没指定 toTurn 就留最近 keepTurns 轮 */
-        const toLine = wantTo ?? Math.max(1, maxTurn - keepTurns)
+        const toLine = (runs[0] && runs[0].to) ?? Math.max(1, maxTurn - keepTurns)
         if (toLine < 1) {
           deps.log(cfg, `context_fold 区间不合理 ${shape} 到=${toLine}`)
           return { text: `最近 ${keepTurns} 轮已经占满了，前面没剩可压的。` }
@@ -645,39 +691,78 @@ function createContextTools(deps) {
          * 留下的孤儿事件会让整个会话读不出来，得手工截断日志才能救。
          * 失败一次就收手，别再往主会话里写垃圾。
          */
-        const bounds = turnBoundaries(session)
-        const firstNode = (session.surface?.nodes || [])[0]
-        const usable = bounds.filter((b) => b.seq > firstNode)
-        /* start：第一个 >= fromTurn 的回合；end：第一个 > toLine 的回合（它自己不压） */
-        const startEntry = usable.find((b) => wantFrom === null || b.turn >= wantFrom)
-        const endEntry = usable.find((b) => b.turn > toLine)
-        if (!startEntry || !endEntry) {
-          deps.log(cfg, `context_fold 找不到边界 ${shape} 区间=${wantFrom ?? 1}~${toLine}`)
-          return { text: '找不到这个区间的完整回合边界，这次没压。' }
-        }
-        if (wantFrom !== null && startEntry.turn > toLine) {
-          deps.log(cfg, `context_fold 区间已压过 ${shape} 起=${startEntry.turn} 到=${toLine}`)
-          return {
-            text: `第${wantFrom}-${toLine}轮已经压成摘要了（现在还能看到的最早回合是第${startEntry.turn}轮）。`,
+        const foldOne = async (run) => {
+          /* 每段都重取一次 session：上一段压完 surface 就变了，旧边界不能再用 */
+          const session = deps.sessionOf(agent)
+          if (!session) return { ok: false, text: '看不到自己的上下文。' }
+          const segs = surfaceMap(session, cfg.foldSegmentTurns || 10)
+          const turns = segs.map((s) => s.turnTo).filter((t) => typeof t === 'number')
+          if (!turns.length) return { ok: false, text: '还没到能压的时候。' }
+          const maxTurn = Math.max(...turns)
+          const toLine = run.to ?? Math.max(1, maxTurn - keepTurns)
+          const fromLine = run.from ?? null
+          const label = `第${fromLine ?? 1}-${toLine}轮`
+          if (toLine < 1) {
+            return { ok: false, text: `最近 ${keepTurns} 轮已经占满了，前面没剩可压的。` }
           }
-        }
-        if (!(endEntry.seq > startEntry.seq)) {
-          deps.log(cfg, `context_fold 区间为空 ${shape} 起=${startEntry.turn} 到=${toLine}`)
-          return { text: '这两头挨着，中间没有可压的内容。' }
+
+          const bounds = turnBoundaries(session)
+          const firstNode = (session.surface?.nodes || [])[0]
+          const usable = bounds.filter((b) => b.seq > firstNode)
+          /* start：第一个 >= fromTurn 的回合；end：第一个 > toLine 的回合（它自己不压） */
+          const startEntry = usable.find((b) => fromLine === null || b.turn >= fromLine)
+          const endEntry = usable.find((b) => b.turn > toLine)
+          if (!startEntry || !endEntry) {
+            deps.log(cfg, `context_fold 找不到边界 ${label}`)
+            return { ok: false, text: `${label}找不到完整回合边界。` }
+          }
+          if (fromLine !== null && startEntry.turn > toLine) {
+            deps.log(cfg, `context_fold 区间已压过 ${label}`)
+            return { ok: false, text: `${label}已经压过了（现在最早能看到第${startEntry.turn}轮）。` }
+          }
+          if (!(endEntry.seq > startEntry.seq)) {
+            deps.log(cfg, `context_fold 区间为空 ${label}`)
+            return { ok: false, text: `${label}两头挨着，没东西可压。` }
+          }
+
+          try {
+            await compaction.compactRegion(startEntry.seq, endEntry.seq, agent, exec.signal)
+          } catch (error) {
+            const message = String((error && error.message) || error)
+            deps.log(cfg, `context_fold seq ${startEntry.seq}-${endEntry.seq} 被拒: ${message.slice(0, 130)}`)
+            return { ok: false, fatal: true, text: `${label}被拒：${message.slice(0, 150)}` }
+          }
+          deps.log(cfg, `context_fold seq ${startEntry.seq}-${endEntry.seq} 轮 ${startEntry.turn}-${toLine} ok=true`)
+          return { ok: true, text: `${label}收成摘要了` }
         }
 
-        try {
-          await compaction.compactRegion(startEntry.seq, endEntry.seq, agent, exec.signal)
-        } catch (error) {
-          const message = String((error && error.message) || error)
-          deps.log(cfg, `context_fold seq ${startEntry.seq}-${endEntry.seq} 被拒: ${message.slice(0, 130)}`)
-          return { text: `压缩被拒：${message.slice(0, 160)}` }
+        /*
+         * 一段一段压，顺序是从后往前。任意一段被拒就整轮收手——
+         * compactRegion 失败不回滚，会留下孤儿事件，再往坏掉的会话上继续写只会更糟。
+         */
+        const done = []
+        const failed = []
+        for (const run of runs) {
+          const result = await foldOne(run)
+          if (result.ok) {
+            done.push(result.text)
+            continue
+          }
+          failed.push(result.text)
+          if (result.fatal) break
         }
-        deps.markFold(agent.id, nowMs)
-        deps.log(cfg, `context_fold seq ${startEntry.seq}-${endEntry.seq} 轮 ${startEntry.turn}-${toLine} ok=true`)
-        return {
-          text: `压完了：第${startEntry.turn}-${toLine}轮收成了一段摘要，前面和后面都原样留着。${remember ? '你交代的那几句已经在记忆里了。' : ''}`,
+        if (done.length) deps.markFold(agent.id, nowMs)
+
+        const rememberNote = remember ? '你交代的那几句已经在记忆里了。' : ''
+        if (done.length === 1 && failed.length === 0) {
+          return { text: `压完了：${done[0]}，前面和后面都原样留着。${rememberNote}` }
         }
+        if (!done.length && !failed.length) return { text: '这次没有可压的区间。' }
+        const parts = []
+        if (done.length) parts.push(`压好了 ${done.length} 段：${done.join('；')}。`)
+        if (failed.length) parts.push(`没动的 ${failed.length} 段：${failed.join('；')}`)
+        return { text: `${parts.join('\n')}${rememberNote ? `\n${rememberNote}` : ''}` }
+
       },
     },
   ]

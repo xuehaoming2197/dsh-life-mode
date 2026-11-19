@@ -49,6 +49,7 @@
                 上下文自己管：
                 - 聊得长了、某一段细节可以不要了，先 context_map 看自己在哪一段。
                 - 再 context_fold 压掉那一段，前面和后面都原样留着。
+                - 一次想清好几段，就传 ranges: [{fromTurn, toTurn}, …]，最多 8 段，可以不相邻。
                 - 压之前把不能忘的写进 remember，压完还记得。
 
           - id: time-context
