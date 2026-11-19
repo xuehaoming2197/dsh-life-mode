@@ -93,10 +93,14 @@ plugin_manager({ action: 'list_bundles' })
 三个包都要是 `installed: true`、`enabled: true`：`dsh-life-mode-preset`、`dsh-life-mode-context`、
 `dsh-life-mode-memory`。
 
-**失败怎么办**：
-- 如果 `link:` 规格被拒，改成传纯绝对路径再试一次。
-- 如果 `enabled` 是 `false`，用第 5 步打开。
-- 如果报版本不满足（`engines.dsh`），**不要**去开版本豁免，直接告诉用户版本对不上、停下。
+**失败怎么办**（这一步是整套流程里最没把握的一步，卡住不奇怪）：
+
+- 如果 `link:` 规格被拒 → 改成传纯绝对路径（`C:/Users/.../bundles/life-preset`）再试一次。
+- 如果提示找不到那个包 → 说明 `install.ps1` 没真正跑成功，回第 3 步检查那几行 `[ok]`。
+- 如果 `enabled` 是 `false` → 用第 5 步打开。
+- 如果报版本不满足（`engines.dsh`）→ **不要**去开版本豁免，直接告诉用户版本对不上、停下。
+- 以上都不行 → 停下。把 `list_bundles` 里这三个包的**原始条目**贴给用户看，
+  **不要**自己手改 `package.json` 去硬凑。
 
 ---
 

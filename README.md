@@ -153,7 +153,8 @@ INSTALL.md              给 AI 的安装规程
 
 - 只支持 Windows，且只在 DSH `0.2.1-rc.3` 上验证过
 - 这套代码在一个跑了 429 轮的会话上长期运行，`install.ps1` 也实测过干跑和临时目录真装；
-  但**没有在一台全新机器上从零复现过完整安装流程**。第一次装遇到问题请提 issue
+  但**没在全新机器上走过完整安装**。其中第 4 步用 `plugin_manager` 的 `link:` 规格注册 bundle，
+  是照现有安装反推出来的，没真跑通过一次。卡在那一步请提 issue，把报错贴上来
 - `compactRegion` 失败时**不回滚**，会在会话日志里留孤儿事件，把会话搞成读不出来的样子。
   所以 `context_fold` 只试一次，失败就停手。真坏了用 `scripts/repair-session-log.mjs` 修，
   细节见 [`docs/02-context-folding.md`](./docs/02-context-folding.md)
