@@ -1,0 +1,7 @@
+# 仓库里统一用 LF。Windows 上的 core.autocrlf 默认会把工作区转成 CRLF，
+# 那会在提交时制造无意义的整文件 diff，这里钉死。
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.webp binary
