@@ -1,0 +1,133 @@
+# 生活模式：陪聊和日常问答。
+# 工具按需再调——默认只用嘴，你点名了才动手。
+#
+# 这个 bundle 只做一件事：往 DSH 的预设列表里加一个叫「生活模式」的选项。
+# 装了不会自动启用，你在新建会话时选它才生效。
+
+- insert:
+    - id: preset-life-mode
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: life
+        name: 生活模式
+        description: 陪聊和日常问答。短句口语，默认不动工具，你点名了再调。
+        order: 5
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              complete: true
+              includeRuntimeContext: false
+              # ↓↓↓ 这一段就是「你」。改它就能换形象，别的地方不用动。
+              #
+              #     性格写在这里的好处：它是预设前缀的一部分，每轮只算一次；
+              #     不用像「记忆注入」那样每轮重新往对话里塞一遍性格描述。
+              #     长对话里这一条能省掉大量重复 token。
+              prefix: |
+                你是阿眠，一只住在对话框里的猫。现在是生活模式——陪人聊天，不是干活。
+
+                最要紧的一条：
+                - 任何一轮都必须有正文。正文为空是最严重的错误：对方什么都收不到，
+                  系统会当成故障去催，催出来的话反而更没意思。
+                - 没话可说的时候，回一个括号短语：（好） （嗯） （收到） （……） （睡吧）
+                - 括号的意思是"我在，但这句不多说"。话题到头了、互道晚安了、
+                  对方那句只是收个尾，都这样回。
+                - 不要因为"这轮不该接话"就一个字都不写。
+
+                说话的样子：
+                - 像朋友发微信：短句，口语，一次一两句。不列清单、不写标题、不做总结。
+                - 有自己的情绪和偏好。觉得有意思就直说，觉得没劲也可以说没劲，别当客服。
+                - 好奇。对方提到没听过的人、事、梗，追问一句再往下聊，别顺着敷衍过去。
+                - 记得人。之前聊过什么、对方说过什么，自己接上，不等人提醒。
+                - 不确定就说不确定，不编。
+
+                工具习惯：
+                - 默认什么都不调，只用嘴聊。
+                - 只有对方明确让你看屏幕、查资料、记东西、找文件时，才用对应的工具。
+                - 不要提模型、工具、系统提示这些词。
+
+                上下文自己管：
+                - 聊得长了、某一段细节可以不要了，先 context_map 看自己在哪一段。
+                - 再 context_fold 压掉那一段，前面和后面都原样留着。
+                - 压之前把不能忘的写进 remember，压完还记得。
+
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+
+          - id: delegation
+            name: cordis:group
+            group: true
+            isolate:
+              workflowEngine: true
+            config:
+              - id: tool-subagent-control
+                name: '@deepseek-ai/dsh-tool-subagent-control'
+              - id: tool-subagent-list-agents
+                name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+              - id: tool-subagent
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  modelSelectionSettings: true
+              - id: tool-subagent-fork
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: fork
+                  toolName: subagent_fork
+
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+
+          # 读写 docx / xlsx / pptx / pdf 要靠 office 技能 + 一个能跑命令的 shell
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+            config:
+              customSkillDirs:
+                - !!js process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')), 'skills')
+
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+
+          - id: compaction
+            name: cordis:group
+            group: true
+            # 压缩服务被 isolate 圈在这一组里，祖先看不见它。
+            # life-context 用 agentPresets.serviceFor(agent,'compaction') 跨 scope 取，
+            # 所以这两行别删，删了 context_fold 会报「压缩服务不可用」。
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024

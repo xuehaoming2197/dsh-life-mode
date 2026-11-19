@@ -1,0 +1,12 @@
+{
+  "name": "dsh-life-mode-memory",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "生活模式的记忆层：官方 memory MCP（写图谱）+ 自带索引 MCP（打分召回 / 置顶 / 归档）。",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

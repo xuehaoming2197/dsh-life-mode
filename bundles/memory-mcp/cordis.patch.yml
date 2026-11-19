@@ -1,0 +1,35 @@
+# 记忆层：两个 MCP 服务。
+#   memory        —— 官方 @modelcontextprotocol/server-memory，负责写图谱
+#   memory_index  —— 本仓库自带的索引服务，负责打分召回 / 置顶 / 归档 / 合并 / 统计
+#
+# 安装脚本会把下面的占位符换成真实路径，再把整个仓库拷到安装目录。
+# 别直接手改这些占位符去装——跑 install.ps1。
+- insert:
+    - id: life-mode-memory
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: memory
+        transport: stdio
+        command: '@NODE@'
+        args:
+          - '@HOME@\memory\node_modules\@modelcontextprotocol\server-memory\dist\index.js'
+        env:
+          MEMORY_FILE_PATH: '@HOME@\memory\memory.jsonl'
+        cwd: '@HOME@\memory'
+        failOnStartupError: true
+
+    - id: life-mode-memory-index
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: memory_index
+        transport: stdio
+        command: '@NODE@'
+        args:
+          - '@HOME@\bundles\memory-mcp\server\mcp-server.js'
+        env:
+          MEMORY_GRAPH: '@HOME@\memory\memory.jsonl'
+          MEMORY_META: '@HOME@\memory\meta.jsonl'
+          MEMORY_BACKUPS: '@HOME@\memory\backups'
+          MEMORY_SERVER: '@HOME@\memory\node_modules\@modelcontextprotocol\server-memory\dist\index.js'
+        cwd: '@HOME@\bundles\memory-mcp\server'
+        failOnStartupError: false

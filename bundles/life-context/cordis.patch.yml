@@ -1,0 +1,6 @@
+# 生活模式：把 life-context 挂到宿主上。
+# 插件自己按 config.json 里的 presets 判断该不该管这个会话，默认只管 life 预设，
+# 所以别的模式（干活、写代码）完全不受影响。
+- insert:
+    - id: life-mode-context
+      name: dsh-life-mode-context

@@ -1,0 +1,19 @@
+{
+  "k": 2,
+  "maxChars": 260,
+  "maxFrameChars": 60,
+  "profileEntities": ["用户"],
+  "profileK": 1,
+  "minRel": 0.06,
+  "autoWrite": false,
+  "autoWriteEntity": "生活·流水",
+  "flowIntervalMinutes": 12,
+  "halfLifeDays": 4,
+  "styleFile": "persona/life-style.md",
+  "injectStyle": true,
+  "injectMemory": true,
+  "foldSegmentTurns": 10,
+  "foldCooldownMinutes": 5,
+  "presets": ["life"],
+  "allowFold": true
+}
