@@ -1,5 +1,9 @@
 # dsh-life-mode
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](./INSTALL.md)
+[![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.3-4B6EF5.svg)](https://www.deepseek.com/harness/)
+
 A long-conversation layer for [DSH](https://www.deepseek.com/harness/): **a chat mode that manages its own context.**
 
 Four hundred turns in, the session should not slow down, get dumber, or forget what you said

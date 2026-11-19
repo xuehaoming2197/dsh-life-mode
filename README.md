@@ -1,5 +1,9 @@
 # dsh-life-mode
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](#已知限制)
+[![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.3-4B6EF5.svg)](https://www.deepseek.com/harness/)
+
 给 [DSH](https://www.deepseek.com/harness/) 的长对话层：**会自己管上下文的聊天模式。**
 
 聊到三四百轮，会话不会突然变卡、变笨、忘记前面说过什么——因为它会像人一样，
