@@ -1,6 +1,6 @@
 {
   "name": "dsh-life-mode-context",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "生活模式上下文层：人设注入、选择性记忆、区间压缩（context_map / context_fold）。",

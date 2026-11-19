@@ -1,6 +1,6 @@
 {
   "name": "dsh-life-mode-preset",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "生活模式：一个陪聊用的 agent 预设，性格写在预设前缀里，默认不动工具。",

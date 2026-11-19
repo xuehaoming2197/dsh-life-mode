@@ -154,13 +154,15 @@ INSTALL.md              给 AI 的安装规程
 ## 已知限制
 
 - 只支持 Windows，且只在 DSH `0.2.1-rc.3` 上验证过
-- 这套代码在一个跑了 429 轮的会话上长期运行，`install.ps1` 也实测过干跑和临时目录真装；
-  但**没在全新机器上走过完整安装**。其中第 4 步用 `plugin_manager` 的 `link:` 规格注册 bundle，
-  是照现有安装反推出来的，没真跑通过一次。卡在那一步请提 issue，把报错贴上来
+- 这套代码在一个跑了 429 轮的会话上长期运行；完整安装流程也在**另一台干净机器上跑通过**：
+  Win10 20H2 + DSH `0.2.1-rc.3`，从 zip 下载 → `install.ps1 -Apply` → `plugin_manager` 注册三个
+  bundle → 重启 → 新建「生活模式」会话。装完日志里能看到 `上下文工具就位 2/2`、每轮注入 91 字、
+  记忆写入成功（`flow ok`）
 - `compactRegion` 失败时**不回滚**，会在会话日志里留孤儿事件，把会话搞成读不出来的样子。
   所以 `context_fold` 只试一次，失败就停手。真坏了用 `scripts/repair-session-log.mjs` 修，
   细节见 [`docs/02-context-folding.md`](./docs/02-context-folding.md)
-- 一次只能压一个连续区间，不支持 pi-midcompact 那种多个不连续区段 + 保留洞
+- 支持一次压多段（`ranges`，可不相邻），但还不支持 pi-midcompact 那种「KEEP 保留洞」
+  ——也就是在要压的区间里挖一个小洞、把其中几轮原样留下来
 - 记忆层依赖官方的 `@modelcontextprotocol/server-memory` 来写图谱，没自己实现写入
 
 ---
