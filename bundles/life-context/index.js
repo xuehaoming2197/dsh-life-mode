@@ -578,6 +578,11 @@ function createContextTools(deps) {
             minimum: 1,
             description: '不填 toTurn 时生效：最近多少轮原样留着。默认 30。',
           },
+          summary: {
+            type: 'string',
+            description:
+              '自己写一段摘要：填了就不跑模型，直接把这段换成你给的话，省掉一次摘要调用。适合"看完一张图，用一句话记下结论"这种。最多 4000 字，建议一两百字。只能配单段（ranges 只有一段或不填）。',
+          },
           remember: {
             type: 'string',
             description:
@@ -597,6 +602,10 @@ function createContextTools(deps) {
         }
 
         const remember = String((args && args.remember) || '').trim()
+        const selfSummary = typeof (args && args.summary) === 'string' ? String(args.summary).trim() : ''
+        if (selfSummary.length > 4000) {
+          return { text: `summary 写了 ${selfSummary.length} 字，太长了；要这么长就别自己写，用默认的摘要。` }
+        }
         /* 区间用轮次说：fromTurn 含、toTurn 含。都不填就是"从头压到最近 beforeTurns 轮之前" */
         const clampTurn = (v) => (Number.isFinite(Number(v)) ? Math.max(1, Math.floor(Number(v))) : null)
         const keepTurns = Math.max(1, Number(args && args.beforeTurns) || 30)
@@ -636,6 +645,9 @@ function createContextTools(deps) {
           cfg,
           `context_fold 开始 段=${runs.length} ${runs.map((r) => `${r.from ?? '开头'}~${r.to ?? `最近${keepTurns}轮之前`}`).join(',')} 记住=${remember.length}字`,
         )
+        if (selfSummary && runs.length > 1) {
+          return { text: '自写摘要一次只能配一段。要多段就别填 summary，让它自己写；或者分几次调。' }
+        }
         if (remember) {
           try {
             await deps.remember(cfg, remember)
@@ -672,12 +684,72 @@ function createContextTools(deps) {
           return { text: `刚压过一次，再等 ${left} 分钟吧。` }
         }
 
-        const { svc: compaction, from } = deps.compaction(agent)
-        if (!compaction) {
-          deps.log(cfg, 'context_fold 取不到 compaction 服务，这次没压')
-          return { text: '压缩服务这会儿不可用（agent.ctx 和宿主都取不到），这次没压。' }
+        let compaction = null
+        let from = ''
+        if (selfSummary) {
+          deps.log(cfg, `context_fold 自写摘要 ${selfSummary.length} 字，不跑模型`)
+        } else {
+          const got = deps.compaction(agent)
+          compaction = got.svc
+          from = got.from
+          if (!compaction) {
+            deps.log(cfg, 'context_fold 取不到 compaction 服务，这次没压')
+            return { text: '压缩服务这会儿不可用（agent.ctx 和宿主都取不到），这次没压。' }
+          }
+          deps.log(cfg, `context_fold 走 ${from} 的 compaction`)
         }
-        deps.log(cfg, `context_fold 走 ${from} 的 compaction`)
+
+        const CHECKPOINT_PREAMBLE =
+          'This is an automatically generated checkpoint condensing an earlier span of the conversation to free up context. Treat the captured context as established background and build on it without restating it. Continue the task directly from the messages that follow, without acknowledging this checkpoint.'
+
+        /*
+         * 自写摘要：不调模型，直接把这个区间换成一条 checkpoint 用户消息。
+         * 形状是从 compaction-basic 的实际产出里抄的：
+         *   source.kind = 'compact-checkpoint'，content 首块是 preamble。
+         * 它自己会检查工具调用配对——区间里只要有半对就叫停，
+         * 因为不配对就替换，会话就坏了。
+         */
+        const replaceWithSummary = (session, startSeq, endSeq, text) => {
+          const evs = []
+          try {
+            const snap = session.snapshotEvents(startSeq, Number(endSeq) + 1)
+            for (const e of snap || []) evs.push(e)
+          } catch (error) {
+            return { ok: false, why: `读不到这段事件：${String((error && error.message) || error).slice(0, 80)}` }
+          }
+          const calls = new Set()
+          const results = new Set()
+          for (const e of evs) {
+            if (e.type === 'assistant/message') {
+              for (const p of e.data?.message?.content || []) {
+                if (p && p.type === 'tool-call' && p.id) calls.add(String(p.id))
+              }
+            } else if (e.type === 'tool/result') {
+              const id = e.data?.message?.toolCallId ?? e.data?.toolCallId
+              if (id) results.add(String(id))
+            }
+          }
+          for (const id of calls) if (!results.has(id)) return { ok: false, why: '这段里有个工具调用，但它的结果不在这段里' }
+          for (const id of results) if (!calls.has(id)) return { ok: false, why: '这段里有个工具结果，但它的调用不在这段里' }
+          try {
+            session.append(
+              'user/message',
+              {
+                content: [
+                  { type: 'text', text: `${CHECKPOINT_PREAMBLE}\n\n<compacted-summary>` },
+                  { type: 'text', text },
+                ],
+                source: { kind: 'compact-checkpoint', compactionId: crypto.randomUUID() },
+                role: 'user',
+                id: crypto.randomUUID(),
+              },
+              { surfaceOp: { op: 'replace', startSeq, endSeq }, sourceEventSeqs: evs.map((e) => e.seq) },
+            )
+          } catch (error) {
+            return { ok: false, why: `写替换消息失败：${String((error && error.message) || error).slice(0, 90)}` }
+          }
+          return { ok: true }
+        }
 
         /*
          * 边界全从「回合开头」里挑：
@@ -723,6 +795,19 @@ function createContextTools(deps) {
           if (!(endEntry.seq > startEntry.seq)) {
             deps.log(cfg, `context_fold 区间为空 ${label}`)
             return { ok: false, text: `${label}两头挨着，没东西可压。` }
+          }
+
+          if (selfSummary) {
+            const swapped = replaceWithSummary(session, startEntry.seq, endEntry.seq, selfSummary)
+            if (!swapped.ok) {
+              deps.log(cfg, `context_fold 自写摘要被拒 ${label}: ${swapped.why}`)
+              return { ok: false, fatal: true, text: `${label}没换成：${swapped.why}` }
+            }
+            deps.log(
+              cfg,
+              `context_fold 自写摘要 seq ${startEntry.seq}-${endEntry.seq} 轮 ${startEntry.turn}-${toLine} ok=true`,
+            )
+            return { ok: true, text: `${label}换成了一句话摘要（没跑模型）` }
           }
 
           let folded = null
