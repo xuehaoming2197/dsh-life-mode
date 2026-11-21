@@ -725,15 +725,24 @@ function createContextTools(deps) {
             return { ok: false, text: `${label}两头挨着，没东西可压。` }
           }
 
+          let folded = null
           try {
-            await compaction.compactRegion(startEntry.seq, endEntry.seq, agent, exec.signal)
+            folded = await compaction.compactRegion(startEntry.seq, endEntry.seq, agent, exec.signal)
           } catch (error) {
             const message = String((error && error.message) || error)
             deps.log(cfg, `context_fold seq ${startEntry.seq}-${endEntry.seq} 被拒: ${message.slice(0, 130)}`)
             return { ok: false, fatal: true, text: `${label}被拒：${message.slice(0, 150)}` }
           }
-          deps.log(cfg, `context_fold seq ${startEntry.seq}-${endEntry.seq} 轮 ${startEntry.turn}-${toLine} ok=true`)
-          return { ok: true, text: `${label}收成摘要了` }
+          /* compactRegion 的返回值里有真实 token 账，别丢 */
+          const saved = Number(folded && folded.shadowedTokenCount)
+          deps.log(
+            cfg,
+            `context_fold seq ${startEntry.seq}-${endEntry.seq} 轮 ${startEntry.turn}-${toLine} ok=true 压掉=${Number.isFinite(saved) ? saved : '?'}token`,
+          )
+          return {
+            ok: true,
+            text: Number.isFinite(saved) && saved > 0 ? `${label}收成摘要了（压掉约 ${saved} token）` : `${label}收成摘要了`,
+          }
         }
 
         /*
