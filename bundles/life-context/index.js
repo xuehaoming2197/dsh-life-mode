@@ -853,14 +853,19 @@ export function apply(ctx, config = {}) {
   }
 
   /*
-   * 这套上下文挂给哪些预设。config.presets 默认 ['life']。
-   * 想让所有会话都用就写 ["*"]，也可以混着写 ["life","standard"]。
+   * 某个 preset 名在不在名单里。名单里写 '*' 就是所有会话，哪怕 preset 认不出来。
+   * 名单为空时退回 ['life']。
    */
-  function presetAllowed(agent, cfg) {
-    const list = Array.isArray(cfg && cfg.presets) && cfg.presets.length ? cfg.presets : ['life']
+  function presetAllowedIn(agent, list) {
+    const names = Array.isArray(list) && list.length ? list : ['life']
+    if (names.includes('*')) return true
     const current = presetOf(agent)
-    if (!current) return false
-    return list.includes('*') || list.includes(current)
+    return Boolean(current) && names.includes(current)
+  }
+
+  /* 陪聊那套（输出铁律 + 风格/记忆注入）挂给哪些预设 */
+  function presetAllowed(agent, cfg) {
+    return presetAllowedIn(agent, cfg && cfg.presets)
   }
 
   function service(name) {
@@ -996,9 +1001,15 @@ export function apply(ctx, config = {}) {
      * section 挂在 agent 自己的 ctx 上，所以只作用于这个 agent，不影响干活的会话。
      */
     try {
-      if (agent?.ctx && presetAllowed(agent, loadConfig())) {
-        const who = String(agent.id || '?')
-
+      const who = String(agent?.id || '?')
+      const liveCfg = loadConfig()
+      /*
+       * 两个开关，别混：
+       *  · presets     —— 谁算「陪聊」：输出铁律 + 风格/记忆注入
+       *  · toolPresets —— 谁拿 context_map / context_fold，不填就跟 presets 一样
+       * 分开是因为：把压缩工具铺到所有会话是合理的，把陪聊口吻铺到所有会话不合理。
+       */
+      if (agent?.ctx && presetAllowed(agent, liveCfg)) {
         /* 两件事各自 try：section 挂了不能连带工具，反过来也一样 */
         const sec = REGISTRY.section.get(who)
         if (!sec || sec.build !== BUILD) {
@@ -1023,7 +1034,9 @@ export function apply(ctx, config = {}) {
           }
           REGISTRY.section.set(who, entry)
         }
+      }
 
+      if (agent?.ctx && presetAllowedIn(agent, liveCfg.toolPresets || liveCfg.presets)) {
         const toolsEntry = REGISTRY.tools.get(who)
         if (!toolsEntry || toolsEntry.build !== BUILD) {
           if (toolsEntry) {
