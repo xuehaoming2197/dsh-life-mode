@@ -16,5 +16,6 @@
   "foldCooldownMinutes": 5,
   "presets": ["life"],
   "toolPresets": ["life"],
-  "allowFold": true
+  "allowFold": true,
+  "allowSelfSummary": false
 }

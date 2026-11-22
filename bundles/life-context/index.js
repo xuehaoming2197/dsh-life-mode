@@ -44,6 +44,12 @@ const DEFAULTS = {
   presets: ['life'],
   /* false = 只给 context_map（看得见但不下压），不把 context_fold 交给模型 */
   allowFold: true,
+  /*
+   * 自写摘要（context_fold 的 summary 参数）要不要开。
+   * 默认关：这条路径自己写 compaction 事件，写错了整条会话读不出来，还没回滚。
+   * 验过再开。
+   */
+  allowSelfSummary: false,
 }
 
 const PUNCT = /[\s\u3000，。、；：！？,.;:!?（）()\[\]【】「」『』“”"'`~～!！?？…—\-·<>《》|]+/g
@@ -603,6 +609,9 @@ function createContextTools(deps) {
 
         const remember = String((args && args.remember) || '').trim()
         const selfSummary = typeof (args && args.summary) === 'string' ? String(args.summary).trim() : ''
+        if (selfSummary && !cfg.allowSelfSummary) {
+          return { text: '自写摘要还没开（config.allowSelfSummary 是 false），这次用默认摘要压。' }
+        }
         if (selfSummary.length > 4000) {
           return { text: `summary 写了 ${selfSummary.length} 字，太长了；要这么长就别自己写，用默认的摘要。` }
         }
@@ -704,11 +713,30 @@ function createContextTools(deps) {
 
         /*
          * 自写摘要：不调模型，直接把这个区间换成一条 checkpoint 用户消息。
-         * 形状是从 compaction-basic 的实际产出里抄的：
-         *   source.kind = 'compact-checkpoint'，content 首块是 preamble。
-         * 它自己会检查工具调用配对——区间里只要有半对就叫停，
-         * 因为不配对就替换，会话就坏了。
+         *
+         * 事件顺序必须和 compaction-basic 完全一样，一步都不能省：
+         *   compaction/start → compaction/summary → user/message(替换) → compaction/end
+         * 少了 start，会话读取器会在状态机里报
+         *   "compaction checkpoint has no matching compaction/start"
+         * 整条会话就打不开了——这是踩过的坑。
+         *
+         * start 里的 turn 必须是当前未结束的回合，所以先找 openTurn。
          */
+        const openTurnOf = (session) => {
+          let evs = []
+          try {
+            evs = session.ownEvents() || []
+          } catch {
+            return null
+          }
+          for (let i = evs.length - 1; i >= 0; i--) {
+            const e = evs[i]
+            if (e.type === 'turn/end') return null
+            if (e.type === 'turn/start') return typeof e.data?.turn === 'number' ? e.data.turn : null
+          }
+          return null
+        }
+
         const replaceWithSummary = (session, startSeq, endSeq, text) => {
           const evs = []
           try {
@@ -731,7 +759,43 @@ function createContextTools(deps) {
           }
           for (const id of calls) if (!results.has(id)) return { ok: false, why: '这段里有个工具调用，但它的结果不在这段里' }
           for (const id of results) if (!calls.has(id)) return { ok: false, why: '这段里有个工具结果，但它的调用不在这段里' }
+
+          let shadowedChars = 0
+          for (const e of evs) {
+            for (const p of e.data?.message?.content || []) {
+              if (typeof p?.text === 'string') shadowedChars += p.text.length
+              if (typeof p?.arguments === 'string') shadowedChars += p.arguments.length
+            }
+          }
+          /* 换成比原文还长的话没意义，官方实现也会拒绝 */
+          if (text.length >= shadowedChars) {
+            return { ok: false, why: `这段话 ${text.length} 字，比要替换的 ${shadowedChars} 字还长，换了反而更占` }
+          }
+
+          const turn = openTurnOf(session)
+          if (turn === null) return { ok: false, why: '当前没有进行中的回合，这时候不能替换' }
+          const ctxInfo = (() => {
+            try {
+              return session.requestContext() || {}
+            } catch {
+              return {}
+            }
+          })()
+          const compactionId = crypto.randomUUID()
+          const lifecycle = { compactionId, turn }
+          let started = false
           try {
+            const startEvent = session.append('compaction/start', lifecycle)
+            started = true
+            const summaryEvent = session.append('compaction/summary', {
+              compactionId,
+              summary: [{ type: 'text', text }],
+              shadowedRange: { start: startSeq, end: endSeq },
+              shadowedSeqs: evs.map((e) => e.seq),
+              shadowedTokenCount: Math.round(shadowedChars / 1.6),
+              ...(ctxInfo.provider ? { provider: ctxInfo.provider } : {}),
+              ...(ctxInfo.model ? { model: ctxInfo.model } : {}),
+            })
             session.append(
               'user/message',
               {
@@ -739,16 +803,27 @@ function createContextTools(deps) {
                   { type: 'text', text: `${CHECKPOINT_PREAMBLE}\n\n<compacted-summary>` },
                   { type: 'text', text },
                 ],
-                source: { kind: 'compact-checkpoint', compactionId: crypto.randomUUID() },
+                source: { kind: 'compact-checkpoint', compactionId },
                 role: 'user',
                 id: crypto.randomUUID(),
               },
-              { surfaceOp: { op: 'replace', startSeq, endSeq }, sourceEventSeqs: evs.map((e) => e.seq) },
+              {
+                surfaceOp: { op: 'replace', startSeq, endSeq },
+                sourceEventSeqs: [startEvent.seq, summaryEvent.seq, ...evs.map((e) => e.seq)],
+              },
             )
+            session.append('compaction/end', lifecycle)
+            return { ok: true }
           } catch (error) {
-            return { ok: false, why: `写替换消息失败：${String((error && error.message) || error).slice(0, 90)}` }
+            const why = String((error && error.message) || error).slice(0, 130)
+            /* 已经写了 start 就必须补 end，否则留下一个开着的压缩，会话照样读不回来 */
+            if (started) {
+              try {
+                session.append('compaction/end', lifecycle)
+              } catch {}
+            }
+            return { ok: false, why }
           }
-          return { ok: true }
         }
 
         /*

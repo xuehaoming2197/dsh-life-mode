@@ -134,6 +134,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Apply   # 真装
 | `presets` | `["life"]` | 谁算「陪聊」：拿输出铁律 + 风格/记忆注入。写 `["*"]` 就是所有会话都挂 |
 | `toolPresets` | 跟 `presets` | 谁拿 `context_map` / `context_fold`。写 `["*"]` 就是**所有会话都能自己压上下文**，但不会被注入陪聊口吻 |
 | `allowFold` | `true` | 关掉就只剩 `context_map`，工具表里连 `context_fold` 都不出现 |
+| `allowSelfSummary` | `false` | 开 `context_fold` 的 `summary`（自己写摘要、不跑模型）。默认关：这条路径自己写 compaction 事件，写错了整条会话读不出来 |
 | `k` | `2` | 每轮注入几条记忆 |
 | `maxChars` | `260` | 注入内容的总字数上限 |
 | `halfLifeDays` | `4` | 记忆强度减半的天数 |
