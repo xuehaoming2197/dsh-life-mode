@@ -114,6 +114,23 @@ SessionFormatError: compaction cannot shadow the protected system head
 `workspace`（默认 `~/.dsh/life-mode`）解析。数据目录由 `LIFE_MODE_HOME` 覆盖。
 安装脚本负责把 YAML 里的占位符换成真实路径。
 
+## 11. 自己写替换消息，必须写全套 compaction 事件
+
+**现象**：会话打不开，报
+`SessionFormatError: compaction checkpoint has no matching compaction/start`。
+
+**原因**：自己 append 了一条 `source.kind = 'compact-checkpoint'` 的替换消息，
+但没有按顺序写 `compaction/start` → `compaction/summary` → 替换 → `compaction/end`。
+会话读取器是个**顺序状态机**：走到检查点消息时，如果当前没有开着的压缩，直接抛。
+
+往日志末尾补一个 `compaction/start` 是**没用的**——状态机早就走过那条检查点了。
+
+**修法**：把那条消息的 `source.kind` 降级成 `user`，替换照旧生效，只是不再被当成压缩检查点。
+脚本：[`scripts/fix-orphan-checkpoint.mjs`](../scripts/fix-orphan-checkpoint.mjs)（先诊断，`--apply` 才改，改前备份）。
+
+**教训**：这条路径没有回滚，一次写错就是整条会话读不出来。所以它默认关着
+（`allowSelfSummary: false`），要开先在一次性会话里验。
+
 ## 教训
 
 最贵的一课是**验证要对拍**：写了个「看起来很科学」的检查（比如按轮次限速），
