@@ -738,13 +738,21 @@ function createContextTools(deps) {
         }
 
         const replaceWithSummary = (session, startSeq, endSeq, text) => {
+          /*
+           * 边界必须落在 surface 上，而且是一段连续区间。
+           * 压过的段会留下「日志里有、surface 里没有」的回合边界，
+           * 拿它当替换边界会把 surface 写坏。
+           */
+          const nodes = session.surface?.nodes || []
+          const i = nodes.findIndex((n) => String(n) === String(startSeq))
+          const j = nodes.findIndex((n) => String(n) === String(endSeq))
+          if (i < 0 || j < 0 || j <= i) return { ok: false, why: '这两个边界不在 surface 的同一段连续区间里' }
           const evs = []
-          try {
-            const snap = session.snapshotEvents(startSeq, Number(endSeq) + 1)
-            for (const e of snap || []) evs.push(e)
-          } catch (error) {
-            return { ok: false, why: `读不到这段事件：${String((error && error.message) || error).slice(0, 80)}` }
+          for (const seq of nodes.slice(i, j + 1)) {
+            const e = session.eventAt(seq)
+            if (e) evs.push(e)
           }
+          if (!evs.length) return { ok: false, why: '读不到这段事件' }
           const calls = new Set()
           const results = new Set()
           for (const e of evs) {
@@ -854,8 +862,15 @@ function createContextTools(deps) {
           }
 
           const bounds = turnBoundaries(session)
-          const firstNode = (session.surface?.nodes || [])[0]
-          const usable = bounds.filter((b) => b.seq > firstNode)
+          const nodes = session.surface?.nodes || []
+          const firstNode = nodes[0]
+          /*
+           * 只留「还在 surface 上」的回合开头。
+           * 压过的段会留下日志里有、surface 里没有的边界，拿它当 end 会被拒
+           * （not found in surface），拿它当替换边界更糟。
+           */
+          const onSurface = new Set(nodes.map((n) => String(n)))
+          const usable = bounds.filter((b) => String(b.seq) !== String(firstNode) && onSurface.has(String(b.seq)))
           /* start：第一个 >= fromTurn 的回合；end：第一个 > toLine 的回合（它自己不压） */
           const startEntry = usable.find((b) => fromLine === null || b.turn >= fromLine)
           const endEntry = usable.find((b) => b.turn > toLine)

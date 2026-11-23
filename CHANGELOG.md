@@ -5,6 +5,11 @@
 - **可以自己写摘要**：`context_fold({..., summary: "一句话"})` 不跑模型，直接把该段换成你给的话。
   默认摘要要重读整段原文，这个模式省掉那次调用；代价是没有八段结构，全靠你写。
   区间里工具调用不配对会直接拒绝（不配对就替换，会话会坏）。
+  需要 `allowSelfSummary: true` 打开——它自己写 compaction 事件，漏一环整条会话就读不出来了。
+- **边界只认 surface**：`turnBoundaries` 里那些被压过的回合边界不在 surface 上了，
+  拿它当 `end` 会被拒（not found in surface），拿它当替换边界更糟。现在只挑还在 surface 上的。
+- 新增 `scripts/check-session-order.mjs` 和 `scripts/fix-orphan-checkpoint.mjs`：
+  前者在写自定义事件后验顺序，后者修「检查点没有对应 start」的坏会话。
 - **压缩工具可以铺到所有会话，不再只限生活模式**。新增 `toolPresets`：谁拿
   `context_map` / `context_fold`；不填就跟 `presets` 一样。
   这样能只给工具、不注入陪聊口吻——把「没话说就回（嗯）」铺到写代码的会话上显然不合适。
