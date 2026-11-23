@@ -610,7 +610,9 @@ function createContextTools(deps) {
         const remember = String((args && args.remember) || '').trim()
         const selfSummary = typeof (args && args.summary) === 'string' ? String(args.summary).trim() : ''
         if (selfSummary && !cfg.allowSelfSummary) {
-          return { text: '自写摘要还没开（config.allowSelfSummary 是 false），这次用默认摘要压。' }
+          return {
+            text: '自写摘要被 config.allowSelfSummary 关掉了，这次什么都没压。要么打开那个开关，要么别传 summary 让它走默认八段摘要。',
+          }
         }
         if (selfSummary.length > 4000) {
           return { text: `summary 写了 ${selfSummary.length} 字，太长了；要这么长就别自己写，用默认的摘要。` }
@@ -702,8 +704,10 @@ function createContextTools(deps) {
           compaction = got.svc
           from = got.from
           if (!compaction) {
-            deps.log(cfg, 'context_fold 取不到 compaction 服务，这次没压')
-            return { text: '压缩服务这会儿不可用（agent.ctx 和宿主都取不到），这次没压。' }
+            deps.log(cfg, 'context_fold 取不到 compaction 服务，这次没压（提示改走自写摘要）')
+            return {
+              text: '这个会话没有可用的压缩服务（预设没挂 compaction），所以「让模型生成摘要」那条路走不通。改用 context_fold({ fromTurn, toTurn, summary: "一句话" }) —— 自写摘要不依赖那个服务，立刻能压。',
+            }
           }
           deps.log(cfg, `context_fold 走 ${from} 的 compaction`)
         }
@@ -1117,8 +1121,10 @@ export function apply(ctx, config = {}) {
   }
 
   /** 工具挂在 agent 自己的 ctx 上，所以别的会话看不见它们 */
-  function registerContextTools(agent) {
-    const tools = agent.ctx.tools || (agent.ctx.get && agent.ctx.get('tools'))
+  function registerContextTools(agent, scopeCtx) {
+    const host = scopeCtx || (agent && agent.ctx)
+    if (!host) return []
+    const tools = host.tools || (host.get && host.get('tools'))
     if (!tools || typeof tools.register !== 'function') {
       logLine(loadConfig(), 'tools 服务不可见，上下文工具没挂上')
       return []
@@ -1130,7 +1136,7 @@ export function apply(ctx, config = {}) {
     const already = (name) => {
       try {
         if (typeof tools.get !== 'function') return false
-        return Boolean(tools.get(name, agent.ctx) || tools.get(name))
+        return Boolean(tools.get(name, host) || tools.get(name))
       } catch {
         return false
       }
@@ -1168,7 +1174,42 @@ export function apply(ctx, config = {}) {
     return disposers
   }
 
+  /*
+   * 全量铺开（toolPresets 里有 '*'）时，插件一加载就全局挂一份。
+   *
+   * 为什么不能只在 pre-step 里挂：新会话第一轮的 tool schema 在 pre-step 之前就定好了，
+   * 所以第一轮看不见这两个工具，要到下一轮才被当成「工具更新」注入进来 ——
+   * 表现出来就是「开头用不了 fold」。
+   */
+  let globalTools = null
+  function ensureGlobalTools() {
+    const cfg = loadConfig()
+    const list = Array.isArray(cfg.toolPresets) && cfg.toolPresets.length ? cfg.toolPresets : cfg.presets
+    if (!Array.isArray(list) || !list.includes('*')) return
+    if (globalTools && globalTools.build === BUILD) return
+    if (globalTools) {
+      for (const off of globalTools.dispose) {
+        try {
+          off()
+        } catch {}
+      }
+      globalTools = null
+    }
+    try {
+      const disposers = registerContextTools(null, ctx)
+      globalTools = { dispose: disposers, build: BUILD }
+      logLine(cfg, `全局上下文工具已注册（toolPresets 含 '*'）`)
+    } catch (error) {
+      logLine(cfg, `全局上下文工具注册失败: ${String((error && error.message) || error).slice(0, 90)}`)
+    }
+  }
+  ensureGlobalTools()
+
   const dispose = ctx.on('agent/pre-step', async ({ agent, messages, step, signal }, next) => {
+    /* 配置可能在运行中从「只给 life」改成「全量」，每轮补一次 */
+    try {
+      ensureGlobalTools()
+    } catch {}
     /* preset 变化时记一笔：注入消失时能一眼看出是「组合丢了」还是「订阅没挂上」 */
     try {
       const current = presetOf(agent)
